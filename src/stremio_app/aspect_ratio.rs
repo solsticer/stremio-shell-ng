@@ -5,15 +5,13 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use crate::stremio_app::{
+    stremio_player::{BoolProp, FpProp, InMsg, InMsgArgs, InMsgFn, PropKey, PropVal, StrProp},
+    window_helper,
+};
 use flume::Sender;
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
-use crate::stremio_app::{
-    stremio_player::{
-        BoolProp, FpProp, InMsg, InMsgArgs, InMsgFn, PropKey, PropVal, StrProp,
-    },
-    window_helper,
-};
 
 static CONFIG_DIR: Lazy<PathBuf> = Lazy::new(|| {
     env::var("APPDATA")
@@ -124,7 +122,10 @@ pub struct AspectController {
 
 impl AspectController {
     pub fn new() -> Self {
-        Self::with_paths(CONFIG_DIR.join("aspect.json"), window_helper::primary_monitor_ratio())
+        Self::with_paths(
+            CONFIG_DIR.join("aspect.json"),
+            window_helper::primary_monitor_ratio(),
+        )
     }
 
     fn with_paths(config_path: PathBuf, display_ratio: f32) -> Self {
@@ -279,11 +280,7 @@ mod tests {
             AspectMode::AutoDetect.overlay_label(ratio),
             format!("Auto ({:.2}:1)", ratio)
         );
-        assert_eq!(
-            AspectMode::Ratio21x9.overlay_label(ratio),
-            "21:9 Ultrawide"
-        );
+        assert_eq!(AspectMode::Ratio21x9.overlay_label(ratio), "21:9 Ultrawide");
         assert_eq!(AspectMode::Cinema.overlay_label(ratio), "Cinema");
     }
 }
-
