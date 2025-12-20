@@ -35,6 +35,7 @@ pub struct MainWindow {
     pub command: String,
     pub commands_path: Option<String>,
     pub webui_url: String,
+    pub no_splash: bool,
     pub dev_tools: bool,
     pub start_hidden: bool,
     pub autoupdater_endpoint: Option<Url>,
@@ -141,6 +142,10 @@ impl MainWindow {
 
         self.window.set_visible(!self.start_hidden);
         self.tray.tray_show_hide.set_checked(!self.start_hidden);
+        if self.no_splash {
+            self.splash_screen.hide();
+        }
+
         let player_channel = self.player.channel.borrow();
         let (player_tx, player_rx) = player_channel
             .as_ref()
@@ -199,6 +204,7 @@ impl MainWindow {
                     let mut rng = rand::thread_rng();
                     let index = rng.gen_range(0..UPDATE_ENDPOINT.len());
                     let mut url = Url::parse(UPDATE_ENDPOINT[index]).unwrap();
+                    url.query_pairs_mut().append_pair("arch", env!("ARCH"));
                     if release_candidate {
                         url.query_pairs_mut().append_pair("rc", "true");
                     }

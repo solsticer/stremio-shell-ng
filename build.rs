@@ -1,5 +1,5 @@
 use chrono::{Datelike, Local};
-use std::{env, io::Cursor, path::PathBuf};
+use std::{env, fs, io::Cursor, path::PathBuf};
 
 extern crate winres;
 fn main() {
@@ -34,9 +34,17 @@ fn main() {
     res.compile().unwrap();
 
     //extract libmpv-2
-    println!("cargo:rerun-if-changed=libmpv-2.zip");
+    let target = std::env::var("TARGET").unwrap();
+    let (arch, archive, flags) = match target.as_str() {
+        "x86_64-pc-windows-msvc" => ("x64", "libmpv-2_x64.zip", "/LIBPATH:.\\mpv-x64"),
+        "aarch64-pc-windows-msvc" => ("arm64", "libmpv-2_arm64.zip", "/LIBPATH:.\\mpv-arm64"),
+        _ => panic!("Unsupported target {}", target),
+    };
+    println!("cargo:rustc-env=ARCH={}", arch);
+    println!("cargo:rustc-link-arg={}", flags);
+    println!("cargo:rerun-if-changed={}", archive);
     {
-        let archive: Vec<u8> = include_bytes!("libmpv-2.zip").to_vec();
+        let archive = fs::read(archive).unwrap();
         let target_dir = PathBuf::from(".");
         zip_extract::extract(Cursor::new(archive), &target_dir, true).ok();
     }
