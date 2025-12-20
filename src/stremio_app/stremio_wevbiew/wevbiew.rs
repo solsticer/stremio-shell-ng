@@ -220,18 +220,6 @@ impl PartialUi for WebView {
                                     window.__bbOverlayTimer = setTimeout(() => toast.classList.remove('visible'), 1700);
                                 };
                             }catch(e){}
-                            try{
-                                window.addEventListener('keydown', (e) => {
-                                    const tag = (e.target && e.target.tagName || "").toUpperCase();
-                                    if(e.ctrlKey || e.altKey || e.metaKey) return;
-                                    if(tag === 'INPUT' || tag === 'TEXTAREA') return;
-                                    if(e.target && e.target.isContentEditable) return;
-                                    if((e.key || "").toLowerCase() === "b") {
-                                        e.preventDefault();
-                                        window.chrome.webview.postMessage('{"id":1,"args":["borderbreaker-cycle"]}');
-                                    }
-                                }, true);
-                            }catch(e){}
                             window.addEventListener("load", function() {if(initShellComm) try { initShellComm() } catch(e) {}}, false)
                             "##, |_| Ok(())).expect("Cannot add script to webview");
                             Ok(())
