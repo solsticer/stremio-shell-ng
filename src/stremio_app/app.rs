@@ -3,7 +3,7 @@ use native_windows_gui as nwg;
 use rand::Rng;
 use serde_json;
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     io::Read,
     os::windows::process::CommandExt,
     path::{Path, PathBuf},
@@ -31,6 +31,7 @@ use super::stremio_server::StremioServer;
 
 #[derive(Default, NwgUi)]
 pub struct MainWindow {
+    pub pip_mode: Cell<bool>,
     pub command: String,
     pub commands_path: Option<String>,
     pub webui_url: String,
@@ -63,6 +64,7 @@ pub struct MainWindow {
         (tray_exit, OnMenuItemSelected): [nwg::stop_thread_dispatch()],
         (tray_show_hide, OnMenuItemSelected): [Self::on_show_hide],
         (tray_topmost, OnMenuItemSelected): [Self::on_toggle_topmost],
+        (tray_pip, OnMenuItemSelected): [Self::on_toggle_pip_notice],
     )]
     pub tray: SystemTray,
     #[nwg_partial(parent: window)]
@@ -76,6 +78,9 @@ pub struct MainWindow {
     #[nwg_control]
     #[nwg_events(OnNotice: [Self::on_toggle_fullscreen_notice] )]
     pub toggle_fullscreen_notice: nwg::Notice,
+    #[nwg_control]
+    #[nwg_events(OnNotice: [Self::on_toggle_pip_notice] )]
+    pub toggle_pip_notice: nwg::Notice,
     #[nwg_control]
     #[nwg_events(OnNotice: [nwg::stop_thread_dispatch()] )]
     pub quit_notice: nwg::Notice,
@@ -243,6 +248,7 @@ impl MainWindow {
         }); // thread
 
         let toggle_fullscreen_sender = self.toggle_fullscreen_notice.sender();
+        let toggle_pip_sender = self.toggle_pip_notice.sender();
         let quit_sender = self.quit_notice.sender();
         let hide_splash_sender = self.hide_splash_notice.sender();
         let focus_sender = self.focus_notice.sender();
@@ -259,6 +265,7 @@ impl MainWindow {
                         web_tx_web.send(RPCResponse::get_handshake()).ok();
                     }
                     Some("win-set-visibility") => toggle_fullscreen_sender.notice(),
+                    Some("win-pip-toggle") => toggle_pip_sender.notice(),
                     Some("quit") => quit_sender.notice(),
                     Some("app-ready") => {
                         hide_splash_sender.notice();
@@ -353,6 +360,10 @@ impl MainWindow {
     }
     fn on_min_max(&self, data: &nwg::EventData) {
         let data = data.on_min_max();
+        if self.pip_mode.get() {
+            data.set_min_size(320, 180);
+            return;
+        }
         data.set_min_size(WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT);
     }
     fn on_paint(&self) {
@@ -371,6 +382,16 @@ impl MainWindow {
             }
         }
         self.transmit_window_visibility_change();
+    }
+    fn on_toggle_pip_notice(&self) {
+        if let Some(hwnd) = self.window.handle.hwnd() {
+            if let Ok(mut saved_style) = self.saved_window_style.try_borrow_mut() {
+                self.pip_mode.set(!saved_style.pip);
+                saved_style.toggle_pip(hwnd);
+                self.tray.tray_pip.set_checked(saved_style.pip);
+                self.webview.fit_to_window(self.window.handle.hwnd());
+            }
+        }
     }
     fn on_hide_splash_notice(&self) {
         self.splash_screen.hide();

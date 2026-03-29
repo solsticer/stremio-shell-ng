@@ -21,6 +21,9 @@ bitflags! {
 #[derive(Default, Clone)]
 pub struct WindowStyle {
     pub full_screen: bool,
+    pub pip: bool,
+    pub pip_pos: (i32, i32),
+    pub pip_size: (i32, i32),
     pub pos: (i32, i32),
     pub size: (i32, i32),
     pub style: i32,
@@ -147,6 +150,67 @@ impl WindowStyle {
             );
         }
         self.ex_style = unsafe { GetWindowLongA(hwnd, GWL_EXSTYLE) };
+    }
+    pub fn toggle_pip(&mut self, hwnd: HWND) {
+        if self.pip {
+            // Restore from PiP
+            unsafe {
+                SetWindowLongA(hwnd, GWL_STYLE, self.style);
+                SetWindowLongA(hwnd, GWL_EXSTYLE, self.ex_style);
+            }
+            let topmost = if self.ex_style as u32 & WS_EX_TOPMOST == WS_EX_TOPMOST {
+                HWND_TOPMOST
+            } else {
+                HWND_NOTOPMOST
+            };
+            self.show_window_at(hwnd, topmost);
+            self.pip = false;
+        } else {
+            // Enter PiP — save current state
+            unsafe {
+                let mut rect = mem::zeroed();
+                GetWindowRect(hwnd, &mut rect);
+                self.pos = (rect.left, rect.top);
+                self.size = ((rect.right - rect.left), (rect.bottom - rect.top));
+                self.style = GetWindowLongA(hwnd, GWL_STYLE);
+                self.ex_style = GetWindowLongA(hwnd, GWL_EXSTYLE);
+            }
+
+            // Small window, no caption, keep thick frame for resize, always on top
+            let pip_style = self.style & !(WS_THICKFRAME as i32);
+            let pip_ex_style = self.ex_style
+                & !(WS_EX_DLGMODALFRAME as i32
+                    | WS_EX_WINDOWEDGE as i32
+                    | WS_EX_CLIENTEDGE as i32
+                    | WS_EX_STATICEDGE as i32)
+                | WS_EX_TOPMOST as i32;
+
+            unsafe {
+                SetWindowLongA(hwnd, GWL_STYLE, pip_style);
+                SetWindowLongA(hwnd, GWL_EXSTYLE, pip_ex_style);
+            }
+
+            // Position bottom-right corner, 400x225 (16:9)
+            let monitor_w = unsafe { GetSystemMetrics(SM_CXSCREEN) };
+            let monitor_h = unsafe { GetSystemMetrics(SM_CYSCREEN) };
+            let pip_w = 400;
+            let pip_h = 225;
+            let pip_x = monitor_w - pip_w - 20;
+            let pip_y = monitor_h - pip_h - 60;
+
+            unsafe {
+                SetWindowPos(
+                    hwnd,
+                    HWND_TOPMOST,
+                    pip_x,
+                    pip_y,
+                    pip_w,
+                    pip_h,
+                    SWP_FRAMECHANGED,
+                );
+            }
+            self.pip = true;
+        }
     }
     pub fn set_active(&mut self, hwnd: HWND) {
         unsafe {
