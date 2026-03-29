@@ -130,7 +130,11 @@ impl MainWindow {
         self.webview.dev_tools.set(self.dev_tools).ok();
         if let Some(hwnd) = self.window.handle.hwnd() {
             if let Ok(mut saved_style) = self.saved_window_style.try_borrow_mut() {
-                saved_style.center_window(hwnd, WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT);
+                if !saved_style.restore_window_state(hwnd) {
+                    saved_style.center_window(hwnd, WINDOW_MIN_WIDTH, WINDOW_MIN_HEIGHT);
+                }
+                // Set title bar to Stremio purple (#6B5B95 -> COLORREF 0x00955B6B)
+                saved_style.set_title_bar_color(hwnd, 0x00955B6B);
             }
         }
 
@@ -419,6 +423,12 @@ impl MainWindow {
         }
     }
     fn on_quit(&self, data: &nwg::EventData) {
+        if let (Some(hwnd), Ok(saved_style)) = (
+            self.window.handle.hwnd(),
+            self.saved_window_style.try_borrow(),
+        ) {
+            saved_style.save_window_state(hwnd);
+        }
         if let nwg::EventData::OnWindowClose(data) = data {
             data.close(false);
         }

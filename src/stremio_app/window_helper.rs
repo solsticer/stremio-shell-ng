@@ -1,4 +1,49 @@
 use std::{cmp, mem};
+use std::path::PathBuf;
+use serde::{Serialize, Deserialize};
+
+#[derive(Serialize, Deserialize)]
+struct SavedWindowGeometry {
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+    maximized: bool,
+}
+
+impl SavedWindowGeometry {
+    fn config_path() -> Option<PathBuf> {
+        std::env::current_exe().ok().and_then(|p| p.parent().map(|d| d.join("window_state.json")))
+    }
+
+    pub fn save(hwnd: HWND) {
+        use winapi::um::winuser::{GetWindowPlacement, WINDOWPLACEMENT, IsZoomed};
+        let maximized = unsafe { IsZoomed(hwnd) } != 0;
+        let mut wp: WINDOWPLACEMENT = unsafe { mem::zeroed() };
+        wp.length = mem::size_of::<WINDOWPLACEMENT>() as u32;
+        if unsafe { GetWindowPlacement(hwnd, &mut wp) } == 0 {
+            return;
+        }
+        let state = SavedWindowGeometry {
+            x: wp.rcNormalPosition.left,
+            y: wp.rcNormalPosition.top,
+            width: wp.rcNormalPosition.right - wp.rcNormalPosition.left,
+            height: wp.rcNormalPosition.bottom - wp.rcNormalPosition.top,
+            maximized,
+        };
+        if let Some(path) = Self::config_path() {
+            if let Ok(json) = serde_json::to_string_pretty(&state) {
+                std::fs::write(path, json).ok();
+            }
+        }
+    }
+
+    pub fn load() -> Option<SavedWindowGeometry> {
+        let path = Self::config_path()?;
+        let json = std::fs::read_to_string(path).ok()?;
+        serde_json::from_str(&json).ok()
+    }
+}
 use winapi::shared::windef::HWND;
 use winapi::um::winuser::{
     GetForegroundWindow, GetMonitorInfoA, GetSystemMetrics, GetWindowLongA, GetWindowRect,
@@ -148,6 +193,42 @@ impl WindowStyle {
         }
         self.ex_style = unsafe { GetWindowLongA(hwnd, GWL_EXSTYLE) };
     }
+    /// Restores window position from saved state. Returns true if restored.
+    pub fn restore_window_state(&mut self, hwnd: HWND) -> bool {
+        if let Some(state) = SavedWindowGeometry::load() {
+            self.pos = (state.x, state.y);
+            self.size = (state.width, state.height);
+            self.show_window_at(hwnd, HWND_NOTOPMOST);
+            if state.maximized {
+                use winapi::um::winuser::{ShowWindow, SW_SHOWMAXIMIZED};
+                unsafe { ShowWindow(hwnd, SW_SHOWMAXIMIZED); }
+            }
+            true
+        } else {
+            false
+        }
+    }
+
+    /// Saves current window position and state to disk.
+    pub fn save_window_state(&self, hwnd: HWND) {
+        SavedWindowGeometry::save(hwnd);
+    }
+
+    /// Sets the window title bar color using DWM API (Windows 10 build 22000+).
+    /// Color format is COLORREF (0x00BBGGRR).
+    pub fn set_title_bar_color(&self, hwnd: HWND, color: u32) {
+        use winapi::um::dwmapi::DwmSetWindowAttribute;
+        const DWMWA_CAPTION_COLOR: u32 = 35;
+        unsafe {
+            DwmSetWindowAttribute(
+                hwnd,
+                DWMWA_CAPTION_COLOR,
+                &color as *const u32 as *const _,
+                std::mem::size_of::<u32>() as u32,
+            );
+        }
+    }
+
     pub fn set_active(&mut self, hwnd: HWND) {
         unsafe {
             SetForegroundWindow(hwnd);
