@@ -5,8 +5,9 @@ use once_cell::unsync::OnceCell;
 use serde_json::json;
 use std::borrow::Cow;
 use std::cell::RefCell;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::mem;
+use std::time::Instant;
 use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -16,6 +17,7 @@ use webview2::Controller;
 use winapi::shared::windef::HWND;
 use winapi::um::winuser::{GetClientRect, VK_F7, WM_APPCOMMAND, WM_SETFOCUS};
 
+const KEY_REPEAT_INTERVAL_MS: u128 = 150;
 const APPCOMMAND_MEDIA_NEXTTRACK: u32 = 11;
 const APPCOMMAND_MEDIA_PREVIOUSTRACK: u32 = 12;
 const APPCOMMAND_MEDIA_PLAY_PAUSE: u32 = 14;
@@ -193,14 +195,31 @@ impl PartialUi for WebView {
                         controller
                             .move_focus(webview2::MoveFocusReason::Programmatic)
                             .ok();
+                        let last_key_time: RefCell<HashMap<u32, Instant>> = RefCell::new(HashMap::new());
                         controller.add_accelerator_key_pressed(move |_, e| {
                             // Block F7, Ctrl+F, and Ctrl+G
                             let k = e.get_virtual_key()?;
                             if k == VK_F7 as u32  || k == 70 & 0x7F || k == 71 & 0x7F {
-                                e.put_handled(true)
-                            } else {
-                                Ok(())
+                                return e.put_handled(true);
                             }
+
+                            let status = e.get_physical_key_status()?;
+                            if status.is_key_released != 0 {
+                                last_key_time.borrow_mut().remove(&k);
+                                return Ok(());
+                            }
+                            if status.was_key_down != 0 {
+                                let now = Instant::now();
+                                let mut times = last_key_time.borrow_mut();
+                                if let Some(last) = times.get(&k) {
+                                    if now.duration_since(*last).as_millis() < KEY_REPEAT_INTERVAL_MS {
+                                        return e.put_handled(true);
+                                    }
+                                }
+                                times.insert(k, now);
+                            }
+
+                            Ok(())
                         })
                         .unwrap();
 
