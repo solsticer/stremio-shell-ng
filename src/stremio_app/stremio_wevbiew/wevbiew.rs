@@ -135,6 +135,32 @@ impl PartialUi for WebView {
                         Ok(())
                     })?;
 
+                        // Must register before navigate() so DocumentCreated runs it ahead of page scripts.
+                        let mut startup_script = format!(
+                            "window.stremio_server_ipc_key='{}';\n",
+                            std::env::var(SERVER_IPC_KEY).unwrap_or_default()
+                        );
+                        startup_script.push_str(r##"
+                        try{
+                            /* Disable context menus */
+                            document.addEventListener('contextmenu', (e) => {
+                                if(!(e.target.tagName == "INPUT" &&
+                                ['text', 'password', 'number', 'week', 'month', 'email'].includes(e.target.type.toLowerCase()))) {
+                                    e.stopPropagation();e.preventDefault()
+                                }
+                                })
+                        }catch(e){}
+
+                        try{console.log('Shell JS injected');if(window.self === window.top) {
+                            window.qt={webChannelTransport:{send:window.chrome.webview.postMessage}};
+                            window.chrome.webview.addEventListener('message',ev=>window.qt.webChannelTransport.onmessage(ev));
+                            }}catch(e){}
+                        window.addEventListener("load", function() {if(initShellComm) try { initShellComm() } catch(e) {}}, false)
+                        "##);
+                        webview
+                            .add_script_to_execute_on_document_created(&startup_script, |_| Ok(()))
+                            .expect("Cannot register startup script");
+
                     if let Some(endpoint) = endpoint.get() {
                         if webview
                             .navigate(endpoint.as_str()).is_err() {
@@ -159,34 +185,6 @@ impl PartialUi for WebView {
                             }
                             Ok(())
                         }).expect("Cannot add full screen element changed");
-
-                        webview.add_content_loading(move |wv, _| {
-                            wv.execute_script(format!(
-                                    "window.stremio_server_ipc_key='{}'",
-                                    std::env::var(SERVER_IPC_KEY).unwrap_or_default()
-                            ).as_str(), |_| Ok(())
-                            ).expect("Cannot add SERVER_IPC_KEY to webview");
-
-                            wv.execute_script(r##"
-                            try{
-                                /* Disable context menus */
-                                document.addEventListener('contextmenu', (e) => {
-                                    if(!(e.target.tagName == "INPUT" &&
-                                    ['text', 'password', 'number', 'week', 'month', 'email'].includes(e.target.type.toLowerCase()))) {
-                                        e.stopPropagation();e.preventDefault()
-                                    }
-                                    })
-                            }catch(e){}
-
-                            try{console.log('Shell JS injected');if(window.self === window.top) {
-                                window.qt={webChannelTransport:{send:window.chrome.webview.postMessage}};
-                                window.chrome.webview.addEventListener('message',ev=>window.qt.webChannelTransport.onmessage(ev));
-                                }}catch(e){}
-                            window.addEventListener("load", function() {if(initShellComm) try { initShellComm() } catch(e) {}}, false)
-                            
-                            "##, |_| Ok(())).expect("Cannot add script to webview");
-                            Ok(())
-                        }).expect("Cannot add content loading");
 
                         WebView::resize_to_window_bounds(Some(&controller), Some(hwnd));
                         controller.put_is_visible(true).ok();
