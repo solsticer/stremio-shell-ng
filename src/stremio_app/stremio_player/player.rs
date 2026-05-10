@@ -1,13 +1,15 @@
 use crate::stremio_app::ipc;
 use crate::stremio_app::RPCResponse;
 use flume::{Receiver, Sender};
-use libmpv2::{events::Event, events::EventContext, Format, Mpv, SetData};
+use libmpv2::{events::Event, events::EventContext, events::PropertyData, Format, Mpv, SetData};
 use native_windows_gui::{self as nwg, PartialUi};
 use std::{
     sync::Arc,
     thread::{self, JoinHandle},
 };
 use winapi::shared::windef::HWND;
+use winapi::um::winbase::SetThreadExecutionState;
+use winapi::um::winnt::{ES_CONTINUOUS, ES_DISPLAY_REQUIRED, ES_SYSTEM_REQUIRED};
 
 use crate::stremio_app::stremio_player::{
     CmdVal, InMsg, InMsgArgs, InMsgFn, PlayerEnded, PlayerEvent, PlayerProprChange, PlayerResponse,
@@ -92,6 +94,10 @@ fn create_event_thread(
         event_context
             .disable_deprecated_events()
             .expect("failed to disable deprecated MPV events");
+        // Shell-owned observer so the display stays awake while playing.
+        if let Err(error) = event_context.observe_property("pause", Format::Flag, 0) {
+            eprintln!("failed to observe pause: {error:?}");
+        }
 
         // -- Event handler loop --
 
@@ -115,18 +121,29 @@ fn create_event_thread(
 
             // even if you don't do anything with the events, it is still necessary to empty the event loop
             let player_response = match event {
-                Event::PropertyChange { name, change, .. } => PlayerResponse(
-                    "mpv-prop-change",
-                    PlayerEvent::PropChange(PlayerProprChange::from_name_value(
-                        name.to_string(),
-                        change,
-                    )),
-                ),
-                Event::EndFile(reason) => PlayerResponse(
-                    "mpv-event-ended",
-                    PlayerEvent::End(PlayerEnded::from_end_reason(reason)),
-                ),
+                Event::PropertyChange { name, change, .. } => {
+                    if name == "pause" {
+                        if let PropertyData::Flag(paused) = change {
+                            set_sleep_inhibit(!paused);
+                        }
+                    }
+                    PlayerResponse(
+                        "mpv-prop-change",
+                        PlayerEvent::PropChange(PlayerProprChange::from_name_value(
+                            name.to_string(),
+                            change,
+                        )),
+                    )
+                }
+                Event::EndFile(reason) => {
+                    set_sleep_inhibit(false);
+                    PlayerResponse(
+                        "mpv-event-ended",
+                        PlayerEvent::End(PlayerEnded::from_end_reason(reason)),
+                    )
+                }
                 Event::Shutdown => {
+                    set_sleep_inhibit(false);
                     break;
                 }
                 _ => continue,
@@ -137,6 +154,17 @@ fn create_event_thread(
                 .expect("failed to send RPCResponse");
         }
     })
+}
+
+fn set_sleep_inhibit(playing: bool) {
+    let flags = if playing {
+        ES_CONTINUOUS | ES_DISPLAY_REQUIRED | ES_SYSTEM_REQUIRED
+    } else {
+        ES_CONTINUOUS
+    };
+    unsafe {
+        SetThreadExecutionState(flags);
+    }
 }
 
 fn create_message_thread(
