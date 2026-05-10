@@ -2,13 +2,13 @@ use crate::stremio_app::constants::{SRV_BUFFER_SIZE, SRV_LOG_SIZE, STREMIO_SERVE
 use native_windows_gui::{self as nwg, PartialUi};
 use std::io::Write;
 use std::{
-    env, fs,
+    env, fs, io,
     io::Read,
     ops::Deref,
     os::windows::process::CommandExt,
     path,
     process::{Command, Stdio},
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, Once},
     thread,
 };
 use winapi::um::{
@@ -20,6 +20,50 @@ use winapi::um::{
         JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
     },
 };
+
+// Guarded by Once: avoids HANDLE leak per crash and re-assignment failure on Win 7/8.
+fn ensure_parent_job_object() {
+    static ONCE: Once = Once::new();
+    ONCE.call_once(|| unsafe {
+        let job = CreateJobObjectA(std::ptr::null_mut(), std::ptr::null_mut());
+        if job.is_null() {
+            eprintln!(
+                "CreateJobObjectA failed: {}; child stremio-runtime may outlive the shell on crash",
+                io::Error::last_os_error()
+            );
+            return;
+        }
+        let jeli = JOBOBJECT_EXTENDED_LIMIT_INFORMATION {
+            BasicLimitInformation: JOBOBJECT_BASIC_LIMIT_INFORMATION {
+                LimitFlags: JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+                    | JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION
+                    | JOB_OBJECT_LIMIT_BREAKAWAY_OK,
+                ..std::mem::zeroed()
+            },
+            ..std::mem::zeroed()
+        };
+        if winapi::um::jobapi2::SetInformationJobObject(
+            job,
+            JobObjectExtendedLimitInformation,
+            &jeli as *const _ as *mut _,
+            std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+        ) == 0
+        {
+            eprintln!(
+                "SetInformationJobObject failed: {}",
+                io::Error::last_os_error()
+            );
+            return;
+        }
+        if winapi::um::jobapi2::AssignProcessToJobObject(job, GetCurrentProcess()) == 0 {
+            eprintln!(
+                "AssignProcessToJobObject failed: {}; child stremio-runtime may outlive the shell",
+                io::Error::last_os_error()
+            );
+        }
+        // Don't CloseHandle: KILL_ON_JOB_CLOSE would terminate the shell itself.
+    });
+}
 
 #[derive(Default)]
 pub struct StremioServer {
@@ -38,31 +82,9 @@ impl StremioServer {
         let logs = self.logs.clone();
         let sender = self.crash_notice.sender();
 
+        ensure_parent_job_object();
+
         thread::spawn(move || {
-            // Use Win32JobObject to kill the child process when the parent process is killed
-            // With the JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK and JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE flags
-            unsafe {
-                let job_main_process = CreateJobObjectA(std::ptr::null_mut(), std::ptr::null_mut());
-                let jeli = JOBOBJECT_EXTENDED_LIMIT_INFORMATION {
-                    BasicLimitInformation: JOBOBJECT_BASIC_LIMIT_INFORMATION {
-                        LimitFlags: JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
-                            | JOB_OBJECT_LIMIT_DIE_ON_UNHANDLED_EXCEPTION
-                            | JOB_OBJECT_LIMIT_BREAKAWAY_OK,
-                        ..std::mem::zeroed()
-                    },
-                    ..std::mem::zeroed()
-                };
-                winapi::um::jobapi2::SetInformationJobObject(
-                    job_main_process,
-                    JobObjectExtendedLimitInformation,
-                    &jeli as *const _ as *mut _,
-                    std::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
-                );
-                winapi::um::jobapi2::AssignProcessToJobObject(
-                    job_main_process,
-                    GetCurrentProcess(),
-                );
-            }
             let mut path = env::current_exe()
                 .and_then(fs::canonicalize)
                 .expect("Cannot get the current executable path");
