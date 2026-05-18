@@ -178,6 +178,9 @@ impl StremioServer {
                     });
                     out_thread.join().ok();
                     err_thread.join().ok();
+                    // Drop on Windows neither kills nor waits, so reap explicitly.
+                    child.kill().ok();
+                    child.wait().ok();
                 }
                 Err(err) => {
                     nwg::error_message(
