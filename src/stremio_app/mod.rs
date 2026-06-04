@@ -12,4 +12,6 @@ pub mod window_helper;
 pub mod window_settings;
 pub use named_pipe::{PipeClient, PipeServer};
 pub mod constants;
+pub mod mpv_hwnd;
+pub mod pip_window;
 pub mod updater;

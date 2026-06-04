@@ -182,8 +182,106 @@ impl PartialUi for WebView {
                                 window.qt={webChannelTransport:{send:window.chrome.webview.postMessage}};
                                 window.chrome.webview.addEventListener('message',ev=>window.qt.webChannelTransport.onmessage(ev));
                                 }}catch(e){}
-                            window.addEventListener("load", function() {if(initShellComm) try { initShellComm() } catch(e) {}}, false)
-                            
+                            window.addEventListener("load", function() {if(initShellComm) try { initShellComm() } catch(e) {}}, false);
+
+                            /* Shell-injected Picture-in-Picture button. It CLONES Stremio's own
+                               fullscreen button (same CSS-module classes) and inserts itself as a
+                               sibling in the player controls, so it inherits Stremio's exact
+                               auto-hide behaviour and hover styling (icons use currentColor).
+                               (Leading `;` defends against ASI from the preceding statement.) */
+                            ;(function(){
+                                if (window.self !== window.top) return; /* top frame only */
+                                if (window.__stremioShellPipInstalled) return;
+                                window.__stremioShellPipInstalled = true;
+
+                                /* PiP glyph drawn in Stremio's stroked-icon style (512 viewBox,
+                                   currentColor): an outlined "screen" with a small solid inset
+                                   window bottom-right. */
+                                var PIP_INNER = ''
+                                    + '<rect x="100" y="126" width="312" height="260" rx="40" ry="40" '
+                                    +   'style="stroke:currentcolor;stroke-width:34;fill:none"></rect>'
+                                    + '<rect x="238" y="240" width="150" height="104" rx="16" ry="16" '
+                                    +   'style="fill:currentcolor;stroke:none"></rect>';
+
+                                function isPlayerRoute(){
+                                    var h = location.hash || '';
+                                    return h.indexOf('/player') !== -1;
+                                }
+
+                                /* Stremio's fullscreen toggle (title "enter/exit fullscreen mode"). */
+                                function findFullscreenBtn(){
+                                    var els = document.querySelectorAll('[title]');
+                                    for (var i = 0; i < els.length; i++){
+                                        var t = (els[i].getAttribute('title') || '').toLowerCase();
+                                        if (t.indexOf('fullscreen') !== -1){
+                                            var r = els[i].getBoundingClientRect();
+                                            if (r.width > 0 && r.height > 0) return els[i];
+                                        }
+                                    }
+                                    return null;
+                                }
+
+                                function buildPipFrom(fsBtn){
+                                    var pip = fsBtn.cloneNode(true); /* copy Stremio's button classes */
+                                    pip.id = 'stremio-shell-pip-btn';
+                                    pip.setAttribute('title', 'Picture-in-Picture');
+                                    pip.removeAttribute('aria-label');
+                                    var svg = pip.querySelector('svg');
+                                    if (svg) { svg.innerHTML = PIP_INNER; } /* keep class + viewBox, swap glyph */
+                                    pip.addEventListener('click', function(e){
+                                        e.stopPropagation();
+                                        e.preventDefault();
+                                        try {
+                                            window.chrome.webview.postMessage(JSON.stringify({
+                                                id: 1, args: ['win-set-pip', {}]
+                                            }));
+                                        } catch(_) {}
+                                    }, true);
+                                    return pip;
+                                }
+
+                                function placeButton(){
+                                    if (!isPlayerRoute()) return;
+                                    var fsBtn = findFullscreenBtn();
+                                    if (!fsBtn || !fsBtn.parentElement) return; /* controls hidden/absent */
+                                    var pip = document.getElementById('stremio-shell-pip-btn');
+                                    /* Already correctly placed immediately left of fullscreen? */
+                                    if (pip && pip.parentElement === fsBtn.parentElement
+                                            && pip.nextElementSibling === fsBtn) {
+                                        return;
+                                    }
+                                    if (!pip || !pip.isConnected) {
+                                        pip = buildPipFrom(fsBtn);
+                                    }
+                                    fsBtn.parentElement.insertBefore(pip, fsBtn);
+                                }
+
+                                window.addEventListener('hashchange', placeButton);
+                                setInterval(placeButton, 500);
+                                placeButton();
+
+                                /* Re-insert if Stremio's React re-renders the controls subtree. */
+                                try {
+                                    var mo = new MutationObserver(function(){ placeButton(); });
+                                    mo.observe(document.documentElement, {childList: true, subtree: true});
+                                } catch(_) {}
+
+                                /* Reflect PiP state in the tooltip only (no custom styling — the
+                                   button inherits Stremio's look entirely). */
+                                try {
+                                    window.chrome.webview.addEventListener('message', function(ev){
+                                        try {
+                                            var data = typeof ev.data === 'string' ? JSON.parse(ev.data) : ev.data;
+                                            var args = data && data.args;
+                                            if (Array.isArray(args) && args[0] === 'win-pip-changed') {
+                                                var enabled = !!(args[1] && args[1].enabled);
+                                                var b = document.getElementById('stremio-shell-pip-btn');
+                                                if (b) b.setAttribute('title', enabled ? 'Exit Picture-in-Picture' : 'Picture-in-Picture');
+                                            }
+                                        } catch(_) {}
+                                    });
+                                } catch(_) {}
+                            })();
                             "##, |_| Ok(())).expect("Cannot add script to webview");
                             Ok(())
                         }).expect("Cannot add content loading");

@@ -13,11 +13,13 @@ native-windows-gui = { git = "https://github.com/Stremio/native-windows-gui", fe
 ] }
 native-windows-derive = "1"
 winapi = { version = "0.3.9", features = [
+    "commctrl",
     "dwmapi",
     "libloaderapi",
     "handleapi",
     "jobapi2",
     "wincon",
+    "wingdi",
     "winuser",
     "namedpipeapi",
 ] }
