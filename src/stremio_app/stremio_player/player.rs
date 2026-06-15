@@ -1,7 +1,7 @@
 use crate::stremio_app::ipc;
 use crate::stremio_app::RPCResponse;
 use flume::{Receiver, Sender};
-use libmpv2::{events::Event, events::EventContext, events::PropertyData, Format, Mpv, SetData};
+use libmpv2::{events::Event, events::PropertyData, Format, Mpv, SetData};
 use native_windows_gui::{self as nwg, PartialUi};
 use std::{
     sync::Arc,
@@ -97,7 +97,7 @@ fn create_event_thread(
             .disable_deprecated_events()
             .expect("failed to disable deprecated MPV events");
         // Shell-owned observer so the display stays awake while playing.
-        if let Err(error) = event_context.observe_property("pause", Format::Flag, 0) {
+        if let Err(error) = mpv_event_client.observe_property("pause", Format::Flag, 0) {
             eprintln!("failed to observe pause: {error:?}");
         }
 
