@@ -177,6 +177,11 @@ fn create_mpv(window_handle: HWND) -> Mpv {
         set_property!("msg-level", "all=no");
         set_property!("quiet", "yes");
         set_property!("hwdec", "auto");
+        // `%23%` escapes the 23-byte HTTP status list as one mpv option value.
+        set_property!(
+            "stream-lavf-o",
+            "reconnect=1,reconnect_streamed=1,reconnect_on_network_error=1,reconnect_on_http_error=%23%408,429,500,502,503,504,reconnect_delay_max=15"
+        );
         // gpu-next: libplacebo VO with modern HDR tone-mapping; gpu, is the fallback.
         set_property!("vo", "gpu-next,gpu,");
         for (name, value) in [
@@ -507,7 +512,7 @@ fn create_message_thread(
             let in_msg: InMsg = match serde_json::from_str(&msg) {
                 Ok(in_msg) => in_msg,
                 Err(error) => {
-                    eprintln!("cannot parse InMsg:{:?} {error:#}", &msg);
+                    eprintln!("cannot parse InMsg:{:?} {error:#}", msg);
                     continue;
                 }
             };
